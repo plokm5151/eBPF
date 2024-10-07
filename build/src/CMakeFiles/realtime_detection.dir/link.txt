@@ -1,0 +1,1 @@
+/usr/bin/c++  -O3 -DNDEBUG   CMakeFiles/realtime_detection.dir/main.cpp.o  -o realtime_detection  libcore.a /usr/lib/x86_64-linux-gnu/libbpf.so -lpthread 

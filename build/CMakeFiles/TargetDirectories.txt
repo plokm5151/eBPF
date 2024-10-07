@@ -1,0 +1,9 @@
+/home/plokm/realtime_process_detection/build/CMakeFiles/rebuild_cache.dir
+/home/plokm/realtime_process_detection/build/CMakeFiles/edit_cache.dir
+/home/plokm/realtime_process_detection/build/ebpf/CMakeFiles/rebuild_cache.dir
+/home/plokm/realtime_process_detection/build/ebpf/CMakeFiles/edit_cache.dir
+/home/plokm/realtime_process_detection/build/ebpf/CMakeFiles/bpf_target.dir
+/home/plokm/realtime_process_detection/build/src/CMakeFiles/rebuild_cache.dir
+/home/plokm/realtime_process_detection/build/src/CMakeFiles/edit_cache.dir
+/home/plokm/realtime_process_detection/build/src/CMakeFiles/realtime_detection.dir
+/home/plokm/realtime_process_detection/build/src/CMakeFiles/core.dir

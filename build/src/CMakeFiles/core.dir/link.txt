@@ -1,0 +1,2 @@
+/usr/bin/ar qc libcore.a  CMakeFiles/core.dir/eBPFProgram.cpp.o CMakeFiles/core.dir/ProcessScanner.cpp.o CMakeFiles/core.dir/Logger.cpp.o CMakeFiles/core.dir/JSONWriter.cpp.o
+/usr/bin/ranlib libcore.a
