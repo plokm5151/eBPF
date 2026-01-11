@@ -72,6 +72,7 @@ jobs:
           cat /proc/sys/kernel/unprivileged_bpf_disabled | tee ci_logs/unprivileged_bpf_disabled.txt || true
           cat /proc/sys/kernel/yama/ptrace_scope | tee ci_logs/ptrace_scope.txt || true
           bpftool version | tee ci_logs/bpftool_version.txt
+          sudo bpftool feature probe 2>&1 | tee ci_logs/bpftool_feature_probe.txt || true
           ls -la /sys/kernel/btf/vmlinux | tee ci_logs/kernel_btf.txt
 
       - name: Configure
@@ -103,10 +104,11 @@ jobs:
       - name: Run unit tests (root)
         run: |
           set -euxo pipefail
+          rc=0
           sudo ./build_ci/tests/runTests \
             --gtest_color=yes \
             --gtest_output=xml:ci_logs/gtest.xml \
-            2>&1 | tee ci_logs/runTests.log
+            2>&1 | tee ci_logs/runTests.log || rc=$?
           if [ -f application.log ]; then
             echo "=== application.log (from unit tests) ===" | tee -a ci_logs/runTests.log
             sudo cat application.log | tee -a ci_logs/runTests.log
@@ -115,6 +117,8 @@ jobs:
           if [ -f scan_results.json ]; then
             sudo cat scan_results.json > ci_logs/scan_results_from_tests.json
           fi
+          sudo dmesg | tail -n 200 | tee ci_logs/dmesg_tail_after_tests.txt || true
+          exit "$rc"
 
       - name: E2E demo (realtime_detection + memory scan + JSON)
         run: |
@@ -144,8 +148,17 @@ jobs:
             > ci_logs/target_process.log 2>&1 &
           TARGET_PID=$!
 
-          wait "$DET_PID"
-          wait "$TARGET_PID"
+          if ! wait "$DET_PID"; then
+            echo "ERROR: realtime_detection exited non-zero"
+            tail -n 200 ci_logs/realtime_detection.log || true
+            sudo dmesg | tail -n 200 | tee ci_logs/dmesg_tail_after_e2e_failure.txt || true
+            exit 1
+          fi
+          if ! wait "$TARGET_PID"; then
+            echo "ERROR: target_process exited non-zero"
+            tail -n 200 ci_logs/target_process.log || true
+            exit 1
+          fi
 
           ls -la scan_results.json application.log | tee ci_logs/e2e_outputs.txt
           sudo cat application.log > ci_logs/application_from_e2e.log
