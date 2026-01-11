@@ -22,6 +22,7 @@ endif()
 target_link_libraries(runTests
     PRIVATE
         core
+        nlohmann_json::nlohmann_json
         "${GTEST_MAIN_TARGET}"
         Threads::Threads
 )
