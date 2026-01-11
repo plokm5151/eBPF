@@ -109,10 +109,12 @@ jobs:
             2>&1 | tee ci_logs/runTests.log
           if [ -f application.log ]; then
             echo "=== application.log (from unit tests) ===" | tee -a ci_logs/runTests.log
-            cat application.log | tee -a ci_logs/runTests.log
+            sudo cat application.log | tee -a ci_logs/runTests.log
+            sudo cat application.log > ci_logs/application_from_tests.log
           fi
-          cp -f application.log ci_logs/application_from_tests.log || true
-          cp -f scan_results.json ci_logs/scan_results_from_tests.json || true
+          if [ -f scan_results.json ]; then
+            sudo cat scan_results.json > ci_logs/scan_results_from_tests.json
+          fi
 
       - name: E2E demo (realtime_detection + memory scan + JSON)
         run: |
@@ -146,10 +148,10 @@ jobs:
           wait "$TARGET_PID"
 
           ls -la scan_results.json application.log | tee ci_logs/e2e_outputs.txt
-          cp -f application.log ci_logs/application_from_e2e.log || true
-          cp -f scan_results.json ci_logs/scan_results_from_e2e.json || true
+          sudo cat application.log > ci_logs/application_from_e2e.log
+          sudo cat scan_results.json > ci_logs/scan_results_from_e2e.json
           echo "=== application.log (from E2E) ===" | tee -a ci_logs/realtime_detection.log
-          cat application.log | tee -a ci_logs/realtime_detection.log || true
+          sudo cat application.log | tee -a ci_logs/realtime_detection.log || true
           export EXPECTED_TARGET_PATH="$TARGET_PROCESS"
           export EXPECTED_TARGET_PID="$TARGET_PID"
           export EXPECTED_TARGET_UID="$(id -u)"
@@ -157,7 +159,7 @@ jobs:
           python3 - <<'PY' | tee ci_logs/e2e_scan_results_parsed.txt
           import json
           import os
-          with open("scan_results.json", "r") as f:
+          with open("ci_logs/scan_results_from_e2e.json", "r") as f:
               obj = json.load(f)
           for k in ("pid", "uid", "gid", "comm", "filePath"):
               if k not in obj:
