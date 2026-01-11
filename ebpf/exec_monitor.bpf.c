@@ -1,6 +1,34 @@
-#include "vmlinux.h"
 #include "ExecMonitor.h"
+
+#include <linux/types.h>
 #include <bpf/bpf_helpers.h>
+
+/*
+ * Tracepoint context structs for sys_enter/sys_exit.
+ *
+ * We intentionally define these locally (instead of including vmlinux.h) to
+ * avoid CO-RE relocations and the runtime dependency on kernel BTF, which is
+ * not guaranteed to be available/usable in all CI environments.
+ *
+ * Layout reference (kernel): struct trace_event_raw_sys_enter/exit.
+ */
+struct trace_event_raw_sys_enter {
+    __u16 common_type;
+    __u8 common_flags;
+    __u8 common_preempt_count;
+    __s32 common_pid;
+    __s64 id;
+    __s64 args[6];
+};
+
+struct trace_event_raw_sys_exit {
+    __u16 common_type;
+    __u8 common_flags;
+    __u8 common_preempt_count;
+    __s32 common_pid;
+    __s64 id;
+    __s64 ret;
+};
 
 struct execve_args_t {
     char filename[256];
@@ -46,7 +74,7 @@ int handle_enter_execve(struct trace_event_raw_sys_enter* ctx)
     }
     __builtin_memset(args, 0, sizeof(*args));
 
-    const char *filename = (const char *)ctx->args[0];
+    const char *filename = (const char *)(unsigned long)ctx->args[0];
     bpf_probe_read_user_str(args->filename, sizeof(args->filename), filename);
 
     bpf_map_update_elem(&execve_args, &pid_tgid, args, BPF_ANY);
