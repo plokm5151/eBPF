@@ -1,17 +1,6 @@
 #include "vmlinux.h"
+#include "ExecMonitor.h"
 #include <bpf/bpf_helpers.h>
-
-#ifndef TASK_COMM_LEN
-#define TASK_COMM_LEN 16
-#endif
-
-struct process_info_t {
-    __u32 pid; // tgid
-    __u32 uid;
-    __u32 gid;
-    char comm[TASK_COMM_LEN];
-    char filename[256];
-};
 
 struct execve_args_t {
     char filename[256];
