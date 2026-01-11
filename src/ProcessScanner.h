@@ -8,10 +8,10 @@ public:
     ProcessScanner() = default;
     ~ProcessScanner() = default;
 
-    // 掃描指定 pid 的行程，搜尋指定的字串模式
+    // Scan process memory for a given pattern.
     bool scanProcess(pid_t pid, const std::string& pattern);
 
-    // 將掃描結果保存為 JSON
+    // Save scan result as JSON.
     void saveScanResult(const ProcessInfo& processInfo);
 
 private:

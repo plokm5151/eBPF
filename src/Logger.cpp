@@ -2,6 +2,7 @@
 #include <iostream>
 #include <chrono>
 #include <ctime>
+#include <iomanip>
 
 
 
@@ -23,11 +24,17 @@ Logger::~Logger() {
 void Logger::logInfo(const std::string& message) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    logFile_ << "[INFO] " << std::ctime(&now) << ": " << message << std::endl;
+    std::tm tm {};
+    localtime_r(&now, &tm);
+    logFile_ << "[INFO] " << std::put_time(&tm, "%F %T") << ": " << message << '\n';
+    logFile_.flush();
 }
 
 void Logger::logError(const std::string& message) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    logFile_ << "[ERROR] " << std::ctime(&now) << ": " << message << std::endl;
+    std::tm tm {};
+    localtime_r(&now, &tm);
+    logFile_ << "[ERROR] " << std::put_time(&tm, "%F %T") << ": " << message << '\n';
+    logFile_.flush();
 }

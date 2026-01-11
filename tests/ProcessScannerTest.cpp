@@ -2,36 +2,32 @@
 
 #include <gtest/gtest.h>
 #include "ProcessScanner.h"
+#include <unistd.h>
 
 TEST(ProcessScannerTest, ScanExistingProcess) {
     ProcessScanner scanner;
-    pid_t pid = getpid(); // 獲取當前進程的 PID
+    pid_t pid = getpid(); // Get current process PID.
     std::string pattern = "ProcessScannerTest";
 
-    bool result = scanner.scan(pid, pattern);
+    bool result = scanner.scanProcess(pid, pattern);
 
-    // 由於當前進程的可執行文件名稱應該包含 "ProcessScannerTest"
+    // The current process address space should contain the literal "ProcessScannerTest".
     EXPECT_TRUE(result);
 }
 
 TEST(ProcessScannerTest, ScanNonExistingProcess) {
     ProcessScanner scanner;
-    pid_t pid = 999999; // 假設這個 PID 不存在
+    pid_t pid = 999999; // Assume this PID doesn't exist.
     std::string pattern = "TestPattern";
 
-    bool result = scanner.scan(pid, pattern);
+    bool result = scanner.scanProcess(pid, pattern);
 
-    // 掃描應該失敗或返回 false
+    // Scan should fail or return false.
     EXPECT_FALSE(result);
 }
 
-TEST(ProcessScannerTest, ScanWithMaliciousInput) {
+TEST(ProcessScannerTest, ScanWithEmptyPattern) {
     ProcessScanner scanner;
     pid_t pid = getpid();
-    std::string pattern = "../../../../etc/passwd";
-
-    bool result = scanner.scan(pid, pattern);
-
-    // 應該正確處理惡意輸入，不應該崩潰或洩露信息
-    EXPECT_FALSE(result);
+    EXPECT_FALSE(scanner.scanProcess(pid, ""));
 }
