@@ -12,6 +12,10 @@
 
 #include <cerrno>
 #include <cstddef>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -26,6 +30,25 @@ template <typename T>
 inline constexpr bool has_member_sz_v = has_member_sz<T>::value;
 
 constexpr size_t kPerfBufferPageCnt = 8;
+
+std::string formatErrno(int err) {
+    if (err == 0) {
+        return "0";
+    }
+    int e = (err < 0) ? -err : err;
+    return std::to_string(err) + " (" + std::string(std::strerror(e)) + ")";
+}
+
+int libbpfPrint(enum libbpf_print_level level, const char* format, va_list args) {
+    const char* ci = std::getenv("CI");
+    const char* debug = std::getenv("RPD_LIBBPF_DEBUG");
+    bool verbose = (debug && *debug) || (ci && *ci);
+
+    if (!verbose && level == LIBBPF_DEBUG) {
+        return 0;
+    }
+    return std::vfprintf(stderr, format, args);
+}
 
 perf_buffer* openPerfBuffer(int mapFd, void* ctx, perf_buffer_sample_fn sampleCb, perf_buffer_lost_fn lostCb) {
     struct perf_buffer_opts opts = {};
@@ -66,19 +89,26 @@ void eBPFProgram::start() {
     running_ = true;
 
     try {
-        exec_monitor_bpf* skel = exec_monitor_bpf__open_and_load();
+        libbpf_set_print(libbpfPrint);
+
+        exec_monitor_bpf* skel = exec_monitor_bpf__open();
         if (!skel) {
-            throw std::runtime_error("Failed to open and load BPF skeleton");
+            throw std::runtime_error("exec_monitor_bpf__open() returned NULL");
         }
-        long skelErr = libbpf_get_error(skel);
-        if (skelErr) {
-            throw std::runtime_error("Failed to open and load BPF skeleton: " + std::to_string(skelErr));
+        long openErr = libbpf_get_error(skel);
+        if (openErr) {
+            throw std::runtime_error("Failed to open BPF skeleton: " + formatErrno(static_cast<int>(openErr)));
+        }
+        int loadErr = exec_monitor_bpf__load(skel);
+        if (loadErr) {
+            exec_monitor_bpf__destroy(skel);
+            throw std::runtime_error("Failed to load BPF skeleton: " + formatErrno(loadErr));
         }
         skel_ = skel;
 
         int err = exec_monitor_bpf__attach(skel_);
         if (err) {
-            throw std::runtime_error("Failed to attach BPF skeleton");
+            throw std::runtime_error("Failed to attach BPF skeleton: " + formatErrno(err));
         }
 
         int mapFd = bpf_map__fd(skel_->maps.events);
