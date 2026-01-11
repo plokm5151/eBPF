@@ -58,6 +58,10 @@ jobs:
           id | tee ci_logs/id.txt
           clang --version | tee ci_logs/clang.txt
           echo 'int x;' | clang -v -E -target bpf -x c - 2>&1 | tee ci_logs/clang_bpf_includes.txt
+          pkg-config --modversion libbpf | tee ci_logs/libbpf_pkgconfig_version.txt || true
+          dpkg -l | grep -E 'libbpf|linux-tools|bpftool' | tee ci_logs/dpkg_libbpf_linux_tools.txt || true
+          cat /proc/sys/kernel/unprivileged_bpf_disabled | tee ci_logs/unprivileged_bpf_disabled.txt || true
+          cat /proc/sys/kernel/yama/ptrace_scope | tee ci_logs/ptrace_scope.txt || true
           bpftool version | tee ci_logs/bpftool_version.txt
           ls -la /sys/kernel/btf/vmlinux | tee ci_logs/kernel_btf.txt
 
@@ -122,8 +126,19 @@ jobs:
           cp -f scan_results.json ci_logs/scan_results_from_e2e.json || true
           python3 - <<'PY' | tee ci_logs/e2e_scan_results_parsed.txt
           import json
+          import os
+          import sys
           with open("scan_results.json", "r") as f:
               obj = json.load(f)
+          for k in ("pid", "uid", "gid", "comm", "filePath"):
+              if k not in obj:
+                  raise SystemExit(f"missing key: {k}")
+          if not isinstance(obj["pid"], int) or obj["pid"] <= 0:
+              raise SystemExit(f"invalid pid: {obj['pid']}")
+          if os.path.basename(str(obj["filePath"])) != "target_process":
+              print(f"warning: unexpected filePath={obj['filePath']}", file=sys.stderr)
+          if "target_process" not in str(obj["comm"]):
+              print(f"warning: unexpected comm={obj['comm']}", file=sys.stderr)
           print(obj)
           PY
 
