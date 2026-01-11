@@ -52,6 +52,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p ci_logs
+          git rev-parse HEAD | tee ci_logs/git_head.txt
           uname -a | tee ci_logs/uname.txt
           cat /etc/os-release | tee ci_logs/os-release.txt
           id | tee ci_logs/id.txt
