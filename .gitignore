@@ -1,0 +1,22 @@
+/.DS_Store
+/.idea/
+/.vscode/
+/.fcache/
+
+# CMake
+/build*/
+/cmake-build-*/
+/CMakeCache.txt
+/CMakeFiles/
+/cmake_install.cmake
+/compile_commands.json
+/CTestTestfile.cmake
+/Testing/
+
+# Editor swap/backup
+*.swp
+*~
+
+# Logs / outputs
+application.log
+scan_results.json
