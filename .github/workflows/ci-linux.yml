@@ -135,21 +135,28 @@ jobs:
           # Ensure the detector is ready before triggering exec.
           sleep 0.5
 
-          sudo "$TARGET_PROCESS" \
+          "$TARGET_PROCESS" \
             --alloc-mb 32 \
             --sleep-ms 8000 \
             --pattern "i am a shellcode" \
-            > ci_logs/target_process.log 2>&1
+            > ci_logs/target_process.log 2>&1 &
+          TARGET_PID=$!
 
           wait "$DET_PID"
+          wait "$TARGET_PID"
 
           ls -la scan_results.json application.log | tee ci_logs/e2e_outputs.txt
           cp -f application.log ci_logs/application_from_e2e.log || true
           cp -f scan_results.json ci_logs/scan_results_from_e2e.json || true
+          echo "=== application.log (from E2E) ===" | tee -a ci_logs/realtime_detection.log
+          cat application.log | tee -a ci_logs/realtime_detection.log || true
+          export EXPECTED_TARGET_PATH="$TARGET_PROCESS"
+          export EXPECTED_TARGET_PID="$TARGET_PID"
+          export EXPECTED_TARGET_UID="$(id -u)"
+          export EXPECTED_TARGET_GID="$(id -g)"
           python3 - <<'PY' | tee ci_logs/e2e_scan_results_parsed.txt
           import json
           import os
-          import sys
           with open("scan_results.json", "r") as f:
               obj = json.load(f)
           for k in ("pid", "uid", "gid", "comm", "filePath"):
@@ -157,10 +164,22 @@ jobs:
                   raise SystemExit(f"missing key: {k}")
           if not isinstance(obj["pid"], int) or obj["pid"] <= 0:
               raise SystemExit(f"invalid pid: {obj['pid']}")
+          expected_path = os.environ.get("EXPECTED_TARGET_PATH")
+          expected_pid = int(os.environ.get("EXPECTED_TARGET_PID", "0"))
+          expected_uid = int(os.environ.get("EXPECTED_TARGET_UID", "-1"))
+          expected_gid = int(os.environ.get("EXPECTED_TARGET_GID", "-1"))
+          if expected_path and obj["filePath"] != expected_path:
+              raise SystemExit(f"unexpected filePath: got={obj['filePath']} expected={expected_path}")
+          if expected_pid and obj["pid"] != expected_pid:
+              raise SystemExit(f"unexpected pid: got={obj['pid']} expected={expected_pid}")
+          if expected_uid >= 0 and obj["uid"] != expected_uid:
+              raise SystemExit(f"unexpected uid: got={obj['uid']} expected={expected_uid}")
+          if expected_gid >= 0 and obj["gid"] != expected_gid:
+              raise SystemExit(f"unexpected gid: got={obj['gid']} expected={expected_gid}")
           if os.path.basename(str(obj["filePath"])) != "target_process":
-              print(f"warning: unexpected filePath={obj['filePath']}", file=sys.stderr)
+              raise SystemExit(f"unexpected basename(filePath)={os.path.basename(str(obj['filePath']))}")
           if "target_process" not in str(obj["comm"]):
-              print(f"warning: unexpected comm={obj['comm']}", file=sys.stderr)
+              raise SystemExit(f"unexpected comm={obj['comm']}")
           print(obj)
           PY
 
