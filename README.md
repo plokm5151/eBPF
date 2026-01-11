@@ -11,6 +11,7 @@ This is designed to showcase:
 
 ## How It Works (High-Level)
 1) **eBPF** attaches to syscall tracepoints (`sys_enter_execve` / `sys_exit_execve`).
+   - The BPF program defines the tracepoint context structs locally (no `vmlinux.h` / no CO-RE), so it does not require kernel BTF at runtime.
 2) On `sys_enter_execve`, it reads the user-space `filename` pointer (best-effort) into a map keyed by `pid_tgid`.
 3) On successful `sys_exit_execve`, it builds a `process_info_t` event (pid/uid/gid/comm/filename) and sends it to user space through a **perf event array** map.
 4) **User space** (libbpf skeleton) opens a perf buffer, receives events, and pushes them into an internal queue.
@@ -20,7 +21,7 @@ This is designed to showcase:
    - `scan_results.json` (process metadata for matches)
 
 ## Repository Layout
-- `ebpf/`: eBPF program (`exec_monitor.bpf.c`) + CMake rules to build BPF object, generate skeleton, and generate `vmlinux.h`
+- `ebpf/`: eBPF program (`exec_monitor.bpf.c`) + CMake rules to build BPF object and generate the libbpf skeleton header
 - `src/`: user-space core (`realtime_detection`) + supporting classes
 - `include/`: shared structs (e.g. `ProcessInfo`)
 - `tests/`: unit tests (GTest)
@@ -30,7 +31,7 @@ This is designed to showcase:
 
 ## Requirements
 ### Linux
-- Kernel with BTF enabled and available at `/sys/kernel/btf/vmlinux`
+- Kernel with eBPF + tracepoints enabled
 - `clang` with BPF target support
 - `bpftool`
 - `libbpf` headers + library (e.g. `libbpf-dev`)
@@ -138,5 +139,5 @@ To inspect results:
 - Go to GitHub Actions → open a run → download the `ci-logs-ubuntu-*` artifact.
 
 ## Notes / Troubleshooting
-- If eBPF fails to load/attach, check kernel support and privileges. CI logs include kernel/BTF details.
+- If eBPF fails to load/attach, check kernel support and privileges. CI logs include kernel details (and will record whether kernel BTF is present).
 - If memory scanning returns false unexpectedly, try increasing `--scan-delay-ms` to allow the process to initialize.
