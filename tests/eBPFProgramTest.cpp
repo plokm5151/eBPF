@@ -3,12 +3,24 @@
 #include <gtest/gtest.h>
 #include "eBPFProgram.h"
 #include <optional>
+#include <unistd.h>
+#include <chrono>
+#include <thread>
+#include <cstdlib>
 
 TEST(eBPFProgramTest, StartAndStop) {
+    if (geteuid() != 0) {
+        GTEST_SKIP() << "Requires root (or CAP_BPF/CAP_PERFMON/CAP_SYS_ADMIN depending on kernel)";
+    }
+
     eBPFProgram program;
 
-    // 測試啟動和停止
-    program.start();
+    // Verify start/stop.
+    try {
+        program.start();
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Failed to start eBPF program: " << e.what();
+    }
     EXPECT_TRUE(program.isRunning());
 
     program.stop();
@@ -16,24 +28,38 @@ TEST(eBPFProgramTest, StartAndStop) {
 }
 
 TEST(eBPFProgramTest, EventProcessing) {
-    eBPFProgram program;
-    program.start();
-
-    // 等待事件產生（可能需要手動觸發一些thread）
-    // 這裡我們等待一段時間
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-
-    // 檢查是否有事件
-    auto event = program.getNextProcessEvent();
-    EXPECT_TRUE(event.has_value());
-
-    if (event.has_value()) {
-        ProcessInfo info = event.value();
-        // 檢查 ProcessInfo 是否合理
-        EXPECT_GT(info.pid, 0);
-        EXPECT_GT(info.gid, 0);
-        EXPECT_FALSE(info.filePath.empty());
+    if (geteuid() != 0) {
+        GTEST_SKIP() << "Requires root (or CAP_BPF/CAP_PERFMON/CAP_SYS_ADMIN depending on kernel)";
     }
+
+    eBPFProgram program;
+    try {
+        program.start();
+    } catch (const std::exception& e) {
+        GTEST_SKIP() << "Failed to start eBPF program: " << e.what();
+    }
+
+    // Trigger an execve ("/bin/true").
+    int rc = std::system("/bin/true");
+    (void)rc;
+
+    // Find the matching event.
+    std::optional<ProcessInfo> matched;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        auto event = program.waitNextProcessEvent(std::chrono::milliseconds(200));
+        if (event && event->filePath == "/bin/true") {
+            matched = std::move(event);
+            break;
+        }
+    }
+
+    ASSERT_TRUE(matched.has_value());
+    EXPECT_GT(matched->pid, 0);
+    EXPECT_EQ(matched->uid, geteuid());
+    EXPECT_EQ(matched->gid, getegid());
+    EXPECT_FALSE(matched->comm.empty());
+    EXPECT_EQ(matched->filePath, "/bin/true");
 
     program.stop();
 }

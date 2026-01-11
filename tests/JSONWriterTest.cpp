@@ -9,15 +9,17 @@ TEST(JSONWriterTest, WriteProcessInfo) {
     JSONWriter writer;
     ProcessInfo info;
     info.pid = 1234;
+    info.uid = 1000;
     info.gid = 1000;
+    info.comm = "test_process";
     info.filePath = "/usr/bin/test_process";
 
-    // 刪除結果文件
+    // Delete previous output file.
     std::remove("scan_results.json");
 
     writer.writeProcessInfo(info);
 
-    // 讀取生成的 JSON 文件
+    // Read the generated JSON file.
     std::ifstream jsonFile("scan_results.json");
     ASSERT_TRUE(jsonFile.is_open());
 
@@ -25,8 +27,10 @@ TEST(JSONWriterTest, WriteProcessInfo) {
     jsonFile >> j;
     jsonFile.close();
 
-    // 檢查 JSON 內容
+    // Validate JSON contents.
     EXPECT_EQ(j["pid"], info.pid);
+    EXPECT_EQ(j["uid"], info.uid);
     EXPECT_EQ(j["gid"], info.gid);
+    EXPECT_EQ(j["comm"], info.comm);
     EXPECT_EQ(j["filePath"], info.filePath);
 }
