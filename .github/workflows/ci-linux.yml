@@ -28,10 +28,25 @@ jobs:
           set -euxo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang llvm bpftool \
+            clang llvm \
             libbpf-dev libelf-dev zlib1g-dev \
             cmake ninja-build pkg-config \
             python3
+          # On Ubuntu, `bpftool` is a virtual package; install a provider explicitly.
+          if ! command -v bpftool >/dev/null 2>&1; then
+            sudo apt-get install -y --no-install-recommends linux-tools-common || true
+          fi
+          if ! command -v bpftool >/dev/null 2>&1; then
+            sudo apt-get install -y --no-install-recommends linux-hwe-6.5-tools-common || true
+          fi
+          if ! command -v bpftool >/dev/null 2>&1; then
+            sudo apt-get install -y --no-install-recommends linux-hwe-6.2-tools-common || true
+          fi
+          if ! command -v bpftool >/dev/null 2>&1; then
+            echo "ERROR: bpftool is required but was not installed."
+            echo "Hint: check which packages provide it with: apt-cache showpkg bpftool"
+            exit 1
+          fi
 
       - name: Collect system info
         run: |
