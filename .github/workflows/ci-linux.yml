@@ -73,7 +73,11 @@ jobs:
           cat /proc/sys/kernel/yama/ptrace_scope | tee ci_logs/ptrace_scope.txt || true
           bpftool version | tee ci_logs/bpftool_version.txt
           sudo bpftool feature probe 2>&1 | tee ci_logs/bpftool_feature_probe.txt || true
-          ls -la /sys/kernel/btf/vmlinux | tee ci_logs/kernel_btf.txt
+          if [ -e /sys/kernel/btf/vmlinux ]; then
+            ls -la /sys/kernel/btf/vmlinux | tee ci_logs/kernel_btf.txt
+          else
+            echo "/sys/kernel/btf/vmlinux not present" | tee ci_logs/kernel_btf.txt
+          fi
 
       - name: Configure
         run: |
@@ -105,7 +109,7 @@ jobs:
         run: |
           set -euxo pipefail
           rc=0
-          sudo ./build_ci/tests/runTests \
+          sudo env CI=1 RPD_LIBBPF_DEBUG=1 ./build_ci/tests/runTests \
             --gtest_color=yes \
             --gtest_output=xml:ci_logs/gtest.xml \
             2>&1 | tee ci_logs/runTests.log || rc=$?
@@ -128,7 +132,7 @@ jobs:
           WATCH_PREFIX="$(realpath build_ci/tools)"
           TARGET_PROCESS="$(realpath build_ci/tools/target_process)"
 
-          sudo ./build_ci/src/realtime_detection \
+          sudo env CI=1 RPD_LIBBPF_DEBUG=1 ./build_ci/src/realtime_detection \
             --watch-prefix "$WATCH_PREFIX" \
             --pattern "i am a shellcode" \
             --workers 2 \
@@ -201,7 +205,7 @@ jobs:
       - name: Multi-thread benchmark (eBPF + scan)
         run: |
           set -euxo pipefail
-          sudo ./build_ci/experiments/ebpf_scan_bench \
+          sudo env CI=1 RPD_LIBBPF_DEBUG=1 ./build_ci/experiments/ebpf_scan_bench \
             --workers 1 \
             --processes 8 \
             --alloc-mb 64 \
@@ -210,7 +214,7 @@ jobs:
             --no-json \
             2>&1 | tee ci_logs/bench_workers_1.log
 
-          sudo ./build_ci/experiments/ebpf_scan_bench \
+          sudo env CI=1 RPD_LIBBPF_DEBUG=1 ./build_ci/experiments/ebpf_scan_bench \
             --workers 4 \
             --processes 8 \
             --alloc-mb 64 \
