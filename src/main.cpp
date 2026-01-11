@@ -7,6 +7,7 @@
 #include <vector>
 #include <cstdlib>
 #include <stdexcept>
+#include <unistd.h>
 #include "eBPFProgram.h"
 #include "ProcessScanner.h"
 #include "Logger.h"
@@ -20,6 +21,17 @@ struct Options {
     int timeoutMs = 0;        // 0 = no timeout
     int scanDelayMs = 0;      // delay before scanning
 };
+
+static std::string tryReadProcExe(pid_t pid) {
+    std::string linkPath = "/proc/" + std::to_string(pid) + "/exe";
+    std::vector<char> buffer(4096);
+    ssize_t n = ::readlink(linkPath.c_str(), buffer.data(), buffer.size() - 1);
+    if (n <= 0) {
+        return {};
+    }
+    buffer[static_cast<size_t>(n)] = '\0';
+    return std::string(buffer.data());
+}
 
 static void printUsage(const char* argv0) {
     std::cout
@@ -108,16 +120,29 @@ int main(int argc, char** argv) {
                     continue;
                 }
 
-                if (processInfo->filePath.rfind(opt.watchPrefix, 0) != 0) {
+                bool matchesPrefix = processInfo->filePath.rfind(opt.watchPrefix, 0) == 0;
+                std::string procExe;
+                if (!matchesPrefix) {
+                    procExe = tryReadProcExe(processInfo->pid);
+                    if (!procExe.empty()) {
+                        matchesPrefix = procExe.rfind(opt.watchPrefix, 0) == 0;
+                    }
+                }
+                if (!matchesPrefix) {
                     continue;
                 }
 
                 size_t current = matchedEvents.fetch_add(1) + 1;
-                logger.logInfo("Matched exec: pid=" + std::to_string(processInfo->pid) +
-                               " uid=" + std::to_string(processInfo->uid) +
-                               " gid=" + std::to_string(processInfo->gid) +
-                               " comm=" + processInfo->comm +
-                               " path=" + processInfo->filePath);
+                std::string logLine =
+                    "Matched exec: pid=" + std::to_string(processInfo->pid) +
+                    " uid=" + std::to_string(processInfo->uid) +
+                    " gid=" + std::to_string(processInfo->gid) +
+                    " comm=" + processInfo->comm +
+                    " path=" + processInfo->filePath;
+                if (!procExe.empty() && procExe != processInfo->filePath) {
+                    logLine += " exe=" + procExe;
+                }
+                logger.logInfo(logLine);
 
                 if (opt.scanDelayMs > 0) {
                     std::this_thread::sleep_for(std::chrono::milliseconds(opt.scanDelayMs));

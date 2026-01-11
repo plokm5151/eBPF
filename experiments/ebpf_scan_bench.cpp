@@ -243,19 +243,26 @@ int main(int argc, char** argv) {
                 continue;
             }
 
-            if (event->filePath != targetAbs) {
-                continue;
-            }
-
             bool shouldScan = false;
+            bool pathMismatch = false;
             {
                 std::lock_guard<std::mutex> lock(remainingMutex);
                 if (remaining.erase(event->pid) > 0) {
                     shouldScan = true;
+                    pathMismatch = (event->filePath != targetAbs);
                 }
             }
             if (!shouldScan) {
                 continue;
+            }
+
+            if (pathMismatch) {
+                std::lock_guard<std::mutex> lock(logMutex);
+                std::cerr << "warning: exec path mismatch"
+                          << " pid=" << event->pid
+                          << " expected=" << targetAbs
+                          << " got=" << event->filePath
+                          << "\n";
             }
 
             eventsMatched.fetch_add(1);
