@@ -29,20 +29,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             clang llvm \
+            linux-tools-common \
             libbpf-dev libelf-dev zlib1g-dev \
             cmake ninja-build pkg-config \
             python3
-          # On Ubuntu, `bpftool` is a virtual package; install a provider explicitly.
-          if ! command -v bpftool >/dev/null 2>&1; then
-            sudo apt-get install -y --no-install-recommends linux-tools-common || true
-          fi
-          if ! command -v bpftool >/dev/null 2>&1; then
-            sudo apt-get install -y --no-install-recommends linux-hwe-6.5-tools-common || true
-          fi
-          if ! command -v bpftool >/dev/null 2>&1; then
-            sudo apt-get install -y --no-install-recommends linux-hwe-6.2-tools-common || true
-          fi
-          if ! command -v bpftool >/dev/null 2>&1; then
+          if ! command -v bpftool >/dev/null 2>&1 && [ ! -x /usr/sbin/bpftool ] && [ ! -x /usr/bin/bpftool ]; then
             echo "ERROR: bpftool is required but was not installed."
             echo "Hint: check which packages provide it with: apt-cache showpkg bpftool"
             exit 1
@@ -60,8 +51,24 @@ jobs:
           echo 'int x;' | clang -v -E -target bpf -x c - 2>&1 | tee ci_logs/clang_bpf_includes.txt
           pkg-config --modversion libbpf | tee ci_logs/libbpf_pkgconfig_version.txt || true
           dpkg -l | grep -E 'libbpf|linux-tools|bpftool' | tee ci_logs/dpkg_libbpf_linux_tools.txt || true
-          rg -n -C 2 "struct perf_buffer_opts" /usr/include/bpf/libbpf.h | tee ci_logs/libbpf_perf_buffer_opts.txt || true
-          rg -n -C 2 "perf_buffer__new\\(" /usr/include/bpf/libbpf.h | tee ci_logs/libbpf_perf_buffer_new.txt || true
+          if [ -f /usr/include/bpf/libbpf.h ]; then
+            ls -la /usr/include/bpf/libbpf.h | tee ci_logs/libbpf_h_ls.txt
+            wc -l /usr/include/bpf/libbpf.h | tee ci_logs/libbpf_h_wc.txt
+
+            # Make perf buffer API drift debuggable (portable: no ripgrep required).
+            grep -n "struct perf_buffer_opts" /usr/include/bpf/libbpf.h \
+              | tee ci_logs/libbpf_perf_buffer_opts.txt || true
+            grep -n "perf_buffer__new" /usr/include/bpf/libbpf.h \
+              | tee ci_logs/libbpf_perf_buffer_new.txt || true
+
+            # When compiler errors reference fixed line numbers (e.g. :683, :1480), these excerpts are immediately useful.
+            nl -ba /usr/include/bpf/libbpf.h | sed -n '640,720p' \
+              | tee ci_logs/libbpf_h_excerpt_640_720.txt || true
+            nl -ba /usr/include/bpf/libbpf.h | sed -n '1460,1525p' \
+              | tee ci_logs/libbpf_h_excerpt_1460_1525.txt || true
+          else
+            echo "ERROR: /usr/include/bpf/libbpf.h not found" | tee ci_logs/libbpf_h_missing.txt
+          fi
           cat /proc/sys/kernel/unprivileged_bpf_disabled | tee ci_logs/unprivileged_bpf_disabled.txt || true
           cat /proc/sys/kernel/yama/ptrace_scope | tee ci_logs/ptrace_scope.txt || true
           bpftool version | tee ci_logs/bpftool_version.txt
@@ -77,12 +84,21 @@ jobs:
             -DRPD_BUILD_EXPERIMENTS=ON \
             -DBUILD_TESTING=ON \
             -DFETCHCONTENT_BASE_DIR=.fcache \
-            | tee ci_logs/cmake_configure.log
+            2>&1 | tee ci_logs/cmake_configure.log
 
       - name: Build
         run: |
           set -euxo pipefail
-          cmake --build build_ci -j --verbose | tee ci_logs/build.log
+          {
+            echo "=== libbpf perf buffer API (grep) ==="
+            cat ci_logs/libbpf_perf_buffer_opts.txt || true
+            cat ci_logs/libbpf_perf_buffer_new.txt || true
+            echo "=== libbpf.h excerpts ==="
+            cat ci_logs/libbpf_h_excerpt_640_720.txt || true
+            cat ci_logs/libbpf_h_excerpt_1460_1525.txt || true
+            echo "=== build ==="
+            cmake --build build_ci -j --verbose
+          } 2>&1 | tee ci_logs/build.log
 
       - name: Run unit tests (root)
         run: |
@@ -90,7 +106,11 @@ jobs:
           sudo ./build_ci/tests/runTests \
             --gtest_color=yes \
             --gtest_output=xml:ci_logs/gtest.xml \
-            | tee ci_logs/runTests.log
+            2>&1 | tee ci_logs/runTests.log
+          if [ -f application.log ]; then
+            echo "=== application.log (from unit tests) ===" | tee -a ci_logs/runTests.log
+            cat application.log | tee -a ci_logs/runTests.log
+          fi
           cp -f application.log ci_logs/application_from_tests.log || true
           cp -f scan_results.json ci_logs/scan_results_from_tests.json || true
 
