@@ -1,45 +1,174 @@
 #include <iostream>
 #include <memory>
+#include <chrono>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <vector>
+#include <cstdlib>
+#include <stdexcept>
 #include "eBPFProgram.h"
 #include "ProcessScanner.h"
 #include "Logger.h"
 
 
-int main() {
-    // 創建 Logger 單例
+struct Options {
+    std::string watchPrefix = "/usr/local/bin";
+    std::string pattern = "i am a shellcode";
+    size_t workers = 1;
+    size_t maxEvents = 0;     // 0 = run forever
+    int timeoutMs = 0;        // 0 = no timeout
+    int scanDelayMs = 0;      // delay before scanning
+};
+
+static void printUsage(const char* argv0) {
+    std::cout
+        << "Usage: " << argv0 << " [options]\n"
+        << "\n"
+        << "Options:\n"
+        << "  --watch-prefix <path>   Only scan exec paths with this prefix (default /usr/local/bin)\n"
+        << "  --pattern <str>         Pattern to search in process memory\n"
+        << "  --workers <n>            Scanner worker threads (default 1)\n"
+        << "  --max-events <n>         Stop after n matched events (default 0 = forever)\n"
+        << "  --timeout-ms <ms>        Stop after ms (default 0 = forever)\n"
+        << "  --scan-delay-ms <ms>     Sleep before scanning to let the process initialize\n"
+        << "  --help                   Show this help\n";
+}
+
+static Options parseArgs(int argc, char** argv) {
+    Options opt;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        auto requireValue = [&](const char* flag) -> const char* {
+            if (i + 1 >= argc) {
+                throw std::runtime_error(std::string("Missing value for ") + flag);
+            }
+            return argv[++i];
+        };
+
+        if (arg == "--watch-prefix") {
+            opt.watchPrefix = requireValue("--watch-prefix");
+        } else if (arg == "--pattern") {
+            opt.pattern = requireValue("--pattern");
+        } else if (arg == "--workers") {
+            opt.workers = std::stoull(requireValue("--workers"));
+        } else if (arg == "--max-events") {
+            opt.maxEvents = std::stoull(requireValue("--max-events"));
+        } else if (arg == "--timeout-ms") {
+            opt.timeoutMs = std::stoi(requireValue("--timeout-ms"));
+        } else if (arg == "--scan-delay-ms") {
+            opt.scanDelayMs = std::stoi(requireValue("--scan-delay-ms"));
+        } else if (arg == "--help") {
+            printUsage(argv[0]);
+            std::exit(0);
+        } else {
+            throw std::runtime_error("Unknown arg: " + arg);
+        }
+    }
+
+    if (opt.workers == 0) {
+        throw std::runtime_error("--workers must be >= 1");
+    }
+    if (opt.timeoutMs < 0) {
+        throw std::runtime_error("--timeout-ms must be >= 0");
+    }
+    if (opt.scanDelayMs < 0) {
+        throw std::runtime_error("--scan-delay-ms must be >= 0");
+    }
+    return opt;
+}
+
+int main(int argc, char** argv) {
+    // Initialize logger singleton.
     auto& logger = Logger::getInstance();
 
     try {
-        // 初始化 eBPF 程式
+        Options opt = parseArgs(argc, argv);
+
+        // Initialize eBPF program.
         auto ebpfProgram = std::make_unique<eBPFProgram>();
 
-        // 啟動 eBPF 程式
+        // Start eBPF program.
         ebpfProgram->start();
 
-        // 創建 ProcessScanner
-        auto processScanner = std::make_unique<ProcessScanner>();
+        std::mutex jsonMutex;
+        std::atomic<size_t> matchedEvents{0};
+        std::atomic<size_t> foundEvents{0};
+        std::atomic<bool> stop{false};
 
-        // 主循環，等待 eBPF 程式的事件
-        while (true) {
-            // 從 eBPF 程式獲取新啟動的行程資訊
-            auto processInfo = ebpfProgram->getNextProcessEvent();
+        auto workerFn = [&]() {
+            ProcessScanner scanner;
 
-            if (processInfo) {
-                // 如果路徑符合條件，進行記憶體掃描
-                if (processInfo->filePath.find("/usr/local/bin") == 0) {
-                    bool found = processScanner->scanProcess(processInfo->pid, "i am a shellcode");
-
-                    if (found) {
-                        // 將結果輸出為 JSON
-                        processScanner->saveScanResult(*processInfo);
+            while (!stop.load()) {
+                auto processInfo = ebpfProgram->waitNextProcessEvent(std::chrono::milliseconds(200));
+                if (!processInfo) {
+                    if (!ebpfProgram->isRunning()) {
+                        break;
                     }
+                    continue;
+                }
+
+                if (processInfo->filePath.rfind(opt.watchPrefix, 0) != 0) {
+                    continue;
+                }
+
+                size_t current = matchedEvents.fetch_add(1) + 1;
+                logger.logInfo("Matched exec: pid=" + std::to_string(processInfo->pid) +
+                               " uid=" + std::to_string(processInfo->uid) +
+                               " gid=" + std::to_string(processInfo->gid) +
+                               " comm=" + processInfo->comm +
+                               " path=" + processInfo->filePath);
+
+                if (opt.scanDelayMs > 0) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(opt.scanDelayMs));
+                }
+
+                bool found = scanner.scanProcess(processInfo->pid, opt.pattern);
+                if (found) {
+                    foundEvents.fetch_add(1);
+                    std::lock_guard<std::mutex> lock(jsonMutex);
+                    scanner.saveScanResult(*processInfo);
+                    logger.logInfo("Pattern FOUND for pid=" + std::to_string(processInfo->pid));
+                } else {
+                    logger.logInfo("Pattern not found for pid=" + std::to_string(processInfo->pid));
+                }
+
+                if (opt.maxEvents > 0 && current >= opt.maxEvents) {
+                    stop.store(true);
+                    ebpfProgram->stop();
+                    break;
                 }
             }
+        };
 
-            // 可以根據需要添加退出條件或休眠時間
+        std::vector<std::thread> workers;
+        workers.reserve(opt.workers);
+        for (size_t i = 0; i < opt.workers; ++i) {
+            workers.emplace_back(workerFn);
         }
 
+        auto startedAt = std::chrono::steady_clock::now();
+        while (!stop.load()) {
+            if (opt.timeoutMs > 0) {
+                auto elapsed = std::chrono::steady_clock::now() - startedAt;
+                if (elapsed >= std::chrono::milliseconds(opt.timeoutMs)) {
+                    stop.store(true);
+                    ebpfProgram->stop();
+                    break;
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+
+        for (auto& t : workers) {
+            t.join();
+        }
+
+        logger.logInfo("Matched events: " + std::to_string(matchedEvents.load()) +
+                       ", found pattern: " + std::to_string(foundEvents.load()));
+
     } catch (const std::exception& e) {
+        std::cerr << e.what() << "\n";
         logger.logError(e.what());
         return EXIT_FAILURE;
     }
