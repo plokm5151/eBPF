@@ -49,64 +49,133 @@ struct has_member_ctx<T, std::void_t<decltype(std::declval<T&>().ctx)>> : std::t
 template <typename T>
 inline constexpr bool has_member_ctx_v = has_member_ctx<T>::value;
 
-template <typename, typename... Args>
-struct is_perf_buffer_new_invocable : std::false_type {};
-
-template <typename... Args>
-struct is_perf_buffer_new_invocable<std::void_t<decltype(perf_buffer__new(std::declval<Args>()...))>, Args...>
-    : std::true_type {};
-
-template <typename... Args>
-inline constexpr bool is_perf_buffer_new_invocable_v = is_perf_buffer_new_invocable<void, Args...>::value;
-
 constexpr size_t kPerfBufferPageCnt = 8;
 
-template <typename Dummy = void>
-perf_buffer* openPerfBuffer(int mapFd, void* ctx, perf_buffer_sample_fn sampleCb, perf_buffer_lost_fn lostCb) {
-    // Prefer the libbpf API where callbacks are passed directly (less struct-field drift).
-    if constexpr (is_perf_buffer_new_invocable_v<int,
-                                                 size_t,
-                                                 perf_buffer_sample_fn,
-                                                 perf_buffer_lost_fn,
-                                                 void*,
-                                                 struct perf_buffer_opts*>) {
-        return perf_buffer__new(mapFd,
-                                kPerfBufferPageCnt,
-                                sampleCb,
-                                lostCb,
-                                ctx,
-                                static_cast<struct perf_buffer_opts*>(nullptr));
-    } else if constexpr (
-        is_perf_buffer_new_invocable_v<int, size_t, perf_buffer_sample_fn, perf_buffer_lost_fn, void*>) {
-        return perf_buffer__new(mapFd, kPerfBufferPageCnt, sampleCb, lostCb, ctx);
-    } else if constexpr (is_perf_buffer_new_invocable_v<int, size_t, struct perf_buffer_opts*>) {
-        // Older libbpf API: callbacks are provided via struct perf_buffer_opts (field set varies by version).
+using perf_buffer_new_3_t = perf_buffer* (*)(int, size_t, const struct perf_buffer_opts*);
+using perf_buffer_new_3_mut_t = perf_buffer* (*)(int, size_t, struct perf_buffer_opts*);
+
+using perf_buffer_new_6_t = perf_buffer* (*)(
+    int,
+    size_t,
+    perf_buffer_sample_fn,
+    perf_buffer_lost_fn,
+    void*,
+    const struct perf_buffer_opts*);
+using perf_buffer_new_6_mut_t =
+    perf_buffer* (*)(int, size_t, perf_buffer_sample_fn, perf_buffer_lost_fn, void*, struct perf_buffer_opts*);
+
+using perf_buffer_new_5_t = perf_buffer* (*)(int, size_t, perf_buffer_sample_fn, perf_buffer_lost_fn, void*);
+
+template <typename PerfNewFn>
+struct PerfBufferNewDispatch {
+    static perf_buffer* create(int /*mapFd*/,
+                               size_t /*pageCnt*/,
+                               perf_buffer_sample_fn /*sampleCb*/,
+                               perf_buffer_lost_fn /*lostCb*/,
+                               void* /*ctx*/) {
+        static_assert(always_false_v<PerfNewFn>,
+                      "Unsupported perf_buffer__new() signature in libbpf headers; update src/eBPFProgram.cpp");
+        return nullptr;
+    }
+};
+
+template <>
+struct PerfBufferNewDispatch<perf_buffer_new_6_t> {
+    static perf_buffer* create(int mapFd,
+                               size_t pageCnt,
+                               perf_buffer_sample_fn sampleCb,
+                               perf_buffer_lost_fn lostCb,
+                               void* ctx) {
+        perf_buffer_new_6_t fn = &perf_buffer__new;
+        return fn(mapFd, pageCnt, sampleCb, lostCb, ctx, nullptr);
+    }
+};
+
+template <>
+struct PerfBufferNewDispatch<perf_buffer_new_6_mut_t> {
+    static perf_buffer* create(int mapFd,
+                               size_t pageCnt,
+                               perf_buffer_sample_fn sampleCb,
+                               perf_buffer_lost_fn lostCb,
+                               void* ctx) {
+        perf_buffer_new_6_mut_t fn = &perf_buffer__new;
+        return fn(mapFd, pageCnt, sampleCb, lostCb, ctx, nullptr);
+    }
+};
+
+template <>
+struct PerfBufferNewDispatch<perf_buffer_new_5_t> {
+    static perf_buffer* create(int mapFd,
+                               size_t pageCnt,
+                               perf_buffer_sample_fn sampleCb,
+                               perf_buffer_lost_fn lostCb,
+                               void* ctx) {
+        perf_buffer_new_5_t fn = &perf_buffer__new;
+        return fn(mapFd, pageCnt, sampleCb, lostCb, ctx);
+    }
+};
+
+template <typename Opts>
+void initPerfBufferOpts(Opts& opts, perf_buffer_sample_fn sampleCb, perf_buffer_lost_fn lostCb, void* ctx) {
+    if constexpr (has_member_sz_v<Opts>) {
+        opts.sz = sizeof(opts);
+    }
+    if constexpr (has_member_sample_cb_v<Opts>) {
+        opts.sample_cb = sampleCb;
+    }
+    if constexpr (has_member_lost_cb_v<Opts>) {
+        opts.lost_cb = lostCb;
+    }
+    if constexpr (has_member_ctx_v<Opts>) {
+        opts.ctx = ctx;
+    }
+}
+
+template <>
+struct PerfBufferNewDispatch<perf_buffer_new_3_t> {
+    static perf_buffer* create(int mapFd,
+                               size_t pageCnt,
+                               perf_buffer_sample_fn sampleCb,
+                               perf_buffer_lost_fn lostCb,
+                               void* ctx) {
         struct perf_buffer_opts opts = {};
-        if constexpr (has_member_sz_v<struct perf_buffer_opts>) {
-            opts.sz = sizeof(opts);
-        }
-        if constexpr (has_member_sample_cb_v<struct perf_buffer_opts>) {
-            opts.sample_cb = sampleCb;
-        }
-        if constexpr (has_member_lost_cb_v<struct perf_buffer_opts>) {
-            opts.lost_cb = lostCb;
-        }
-        if constexpr (has_member_ctx_v<struct perf_buffer_opts>) {
-            opts.ctx = ctx;
-        }
+        initPerfBufferOpts(opts, sampleCb, lostCb, ctx);
 
         constexpr bool hasCallbacks = has_member_sample_cb_v<struct perf_buffer_opts> &&
                                       has_member_lost_cb_v<struct perf_buffer_opts> &&
                                       has_member_ctx_v<struct perf_buffer_opts>;
         static_assert(hasCallbacks,
-                      "libbpf perf_buffer__new(map_fd, page_cnt, opts) exists, but perf_buffer_opts has no callback fields");
+                      "libbpf provides perf_buffer__new(map_fd, page_cnt, opts) but perf_buffer_opts has no callback fields");
 
-        return perf_buffer__new(mapFd, kPerfBufferPageCnt, &opts);
-    } else {
-        static_assert(always_false_v<Dummy>,
-                      "Unsupported perf_buffer__new() API in libbpf headers; update src/eBPFProgram.cpp");
-        return nullptr;
+        perf_buffer_new_3_t fn = &perf_buffer__new;
+        return fn(mapFd, pageCnt, &opts);
     }
+};
+
+template <>
+struct PerfBufferNewDispatch<perf_buffer_new_3_mut_t> {
+    static perf_buffer* create(int mapFd,
+                               size_t pageCnt,
+                               perf_buffer_sample_fn sampleCb,
+                               perf_buffer_lost_fn lostCb,
+                               void* ctx) {
+        struct perf_buffer_opts opts = {};
+        initPerfBufferOpts(opts, sampleCb, lostCb, ctx);
+
+        constexpr bool hasCallbacks = has_member_sample_cb_v<struct perf_buffer_opts> &&
+                                      has_member_lost_cb_v<struct perf_buffer_opts> &&
+                                      has_member_ctx_v<struct perf_buffer_opts>;
+        static_assert(hasCallbacks,
+                      "libbpf provides perf_buffer__new(map_fd, page_cnt, opts) but perf_buffer_opts has no callback fields");
+
+        perf_buffer_new_3_mut_t fn = &perf_buffer__new;
+        return fn(mapFd, pageCnt, &opts);
+    }
+};
+
+perf_buffer* openPerfBuffer(int mapFd, void* ctx, perf_buffer_sample_fn sampleCb, perf_buffer_lost_fn lostCb) {
+    using perf_new_t = decltype(&perf_buffer__new);
+    return PerfBufferNewDispatch<perf_new_t>::create(mapFd, kPerfBufferPageCnt, sampleCb, lostCb, ctx);
 }
 } // namespace
 
@@ -147,7 +216,7 @@ void eBPFProgram::start() {
 
         int mapFd = bpf_map__fd(skel_->maps.events);
 
-        perf_buffer* pb = openPerfBuffer<>(mapFd, this, &eBPFProgram::handleEvent, &eBPFProgram::handleLostEvents);
+        perf_buffer* pb = openPerfBuffer(mapFd, this, &eBPFProgram::handleEvent, &eBPFProgram::handleLostEvents);
         if (!pb) {
             throw std::runtime_error("Failed to open perf buffer");
         }
