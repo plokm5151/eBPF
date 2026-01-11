@@ -74,7 +74,7 @@ jobs:
       - name: Build
         run: |
           set -euxo pipefail
-          cmake --build build_ci -j | tee ci_logs/build.log
+          cmake --build build_ci -j --verbose | tee ci_logs/build.log
 
       - name: Run unit tests (root)
         run: |
@@ -92,6 +92,7 @@ jobs:
           rm -f scan_results.json application.log
 
           WATCH_PREFIX="$(realpath build_ci/tools)"
+          TARGET_PROCESS="$(realpath build_ci/tools/target_process)"
 
           sudo ./build_ci/src/realtime_detection \
             --watch-prefix "$WATCH_PREFIX" \
@@ -106,13 +107,13 @@ jobs:
           # Ensure the detector is ready before triggering exec.
           sleep 0.5
 
-          sudo ./build_ci/tools/target_process \
+          sudo "$TARGET_PROCESS" \
             --alloc-mb 32 \
             --sleep-ms 8000 \
             --pattern "i am a shellcode" \
-            > ci_logs/target_process.log 2>&1 || true
+            > ci_logs/target_process.log 2>&1
 
-          wait "$DET_PID" || true
+          wait "$DET_PID"
 
           ls -la scan_results.json application.log | tee ci_logs/e2e_outputs.txt
           cp -f application.log ci_logs/application_from_e2e.log || true
