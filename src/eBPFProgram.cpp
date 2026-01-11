@@ -1,10 +1,14 @@
 #include "eBPFProgram.h"
 
+#include "ExecMonitor.h"
 #include "exec_monitor.skel.h"
 #include "Logger.h"
 
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+#if __has_include(<bpf/libbpf_version.h>)
+#include <bpf/libbpf_version.h>
+#endif
 
 #include <sys/resource.h>
 #include <unistd.h>
@@ -33,27 +37,48 @@ void eBPFProgram::start() {
     running_ = true;
 
     try {
-        skel_ = exec_monitor_bpf__open_and_load();
-        if (!skel_) {
+        exec_monitor_bpf* skel = exec_monitor_bpf__open_and_load();
+        if (!skel) {
             throw std::runtime_error("Failed to open and load BPF skeleton");
         }
+        long skelErr = libbpf_get_error(skel);
+        if (skelErr) {
+            throw std::runtime_error("Failed to open and load BPF skeleton: " + std::to_string(skelErr));
+        }
+        skel_ = skel;
 
         int err = exec_monitor_bpf__attach(skel_);
         if (err) {
             throw std::runtime_error("Failed to attach BPF skeleton");
         }
 
-        pb_ = perf_buffer__new(
-            bpf_map__fd(skel_->maps.events),
+        int mapFd = bpf_map__fd(skel_->maps.events);
+
+#if defined(LIBBPF_MAJOR_VERSION) && (LIBBPF_MAJOR_VERSION >= 1)
+        struct perf_buffer_opts pbOpts = {};
+        pbOpts.sz = sizeof(pbOpts);
+        pbOpts.sample_cb = &eBPFProgram::handleEvent;
+        pbOpts.lost_cb = &eBPFProgram::handleLostEvents;
+        pbOpts.ctx = this;
+        perf_buffer* pb = perf_buffer__new(mapFd, 8, &pbOpts);
+#else
+        perf_buffer* pb = perf_buffer__new(
+            mapFd,
             8,
             &eBPFProgram::handleEvent,
             &eBPFProgram::handleLostEvents,
             this,
             nullptr
         );
-        if (!pb_) {
+#endif
+        if (!pb) {
             throw std::runtime_error("Failed to open perf buffer");
         }
+        long pbErr = libbpf_get_error(pb);
+        if (pbErr) {
+            throw std::runtime_error("Failed to open perf buffer: " + std::to_string(pbErr));
+        }
+        pb_ = pb;
 
         listenerThread_ = std::thread(&eBPFProgram::eventListener, this);
     } catch (...) {
