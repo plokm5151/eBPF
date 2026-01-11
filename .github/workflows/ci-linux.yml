@@ -60,6 +60,8 @@ jobs:
           echo 'int x;' | clang -v -E -target bpf -x c - 2>&1 | tee ci_logs/clang_bpf_includes.txt
           pkg-config --modversion libbpf | tee ci_logs/libbpf_pkgconfig_version.txt || true
           dpkg -l | grep -E 'libbpf|linux-tools|bpftool' | tee ci_logs/dpkg_libbpf_linux_tools.txt || true
+          rg -n -C 2 "struct perf_buffer_opts" /usr/include/bpf/libbpf.h | tee ci_logs/libbpf_perf_buffer_opts.txt || true
+          rg -n -C 2 "perf_buffer__new\\(" /usr/include/bpf/libbpf.h | tee ci_logs/libbpf_perf_buffer_new.txt || true
           cat /proc/sys/kernel/unprivileged_bpf_disabled | tee ci_logs/unprivileged_bpf_disabled.txt || true
           cat /proc/sys/kernel/yama/ptrace_scope | tee ci_logs/ptrace_scope.txt || true
           bpftool version | tee ci_logs/bpftool_version.txt
