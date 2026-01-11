@@ -1,8 +1,3 @@
-# tests/CMakeLists.txt
-
-cmake_minimum_required(VERSION 3.10)
-
-# 添加測試可執行文件
 add_executable(runTests
     LoggerTest.cpp
     ProcessScannerTest.cpp
@@ -10,18 +5,25 @@ add_executable(runTests
     eBPFProgramTest.cpp
 )
 
-# 包含源代碼目錄和第三方庫
-include_directories(${CMAKE_SOURCE_DIR}/src)
-include_directories(${CMAKE_SOURCE_DIR}/include)
-include_directories(${CMAKE_SOURCE_DIR}/ebpf)
-include_directories(${LIBBPF_INCLUDE_DIRS})
-
-# 連接需要測試的庫和第三方庫
-target_link_libraries(runTests
-    core
-    gtest
-    gtest_main
-    pthread
-    ${LIBBPF_LIBRARIES}
-    nlohmann_json::nlohmann_json
+target_include_directories(runTests
+    PRIVATE
+        "${CMAKE_SOURCE_DIR}/src"
+        "${CMAKE_SOURCE_DIR}/include"
 )
+
+if(TARGET GTest::gtest_main)
+    set(GTEST_MAIN_TARGET GTest::gtest_main)
+elseif(TARGET gtest_main)
+    set(GTEST_MAIN_TARGET gtest_main)
+else()
+    message(FATAL_ERROR "gtest_main target not found; enable RPD_FETCH_DEPS or install GTest")
+endif()
+
+target_link_libraries(runTests
+    PRIVATE
+        core
+        "${GTEST_MAIN_TARGET}"
+        Threads::Threads
+)
+
+add_test(NAME runTests COMMAND runTests)
