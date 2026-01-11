@@ -9,6 +9,16 @@ This is designed to showcase:
 1) eBPF reliably capturing process execution metadata, and
 2) multi-threaded user-space processing/scanning throughput.
 
+## How It Works (High-Level)
+1) **eBPF** attaches to syscall tracepoints (`sys_enter_execve` / `sys_exit_execve`).
+2) On `sys_enter_execve`, it reads the user-space `filename` pointer (best-effort) into a map keyed by `pid_tgid`.
+3) On successful `sys_exit_execve`, it builds a `process_info_t` event (pid/uid/gid/comm/filename) and sends it to user space through a **perf event array** map.
+4) **User space** (libbpf skeleton) opens a perf buffer, receives events, and pushes them into an internal queue.
+5) **Worker threads** consume events, filter by `--watch-prefix`, and optionally scan the process memory for `--pattern`.
+6) Results are persisted as:
+   - `application.log` (human-readable log lines)
+   - `scan_results.json` (process metadata for matches)
+
 ## Repository Layout
 - `ebpf/`: eBPF program (`exec_monitor.bpf.c`) + CMake rules to build BPF object, generate skeleton, and generate `vmlinux.h`
 - `src/`: user-space core (`realtime_detection`) + supporting classes
@@ -24,6 +34,16 @@ This is designed to showcase:
 - `clang` with BPF target support
 - `bpftool`
 - `libbpf` headers + library (e.g. `libbpf-dev`)
+
+### Ubuntu packages (example)
+```sh
+sudo apt-get update
+sudo apt-get install -y --no-install-recommends \
+  clang llvm linux-tools-common \
+  libbpf-dev libelf-dev zlib1g-dev \
+  cmake ninja-build pkg-config \
+  python3
+```
 
 ### Privileges
 Loading eBPF programs and attaching tracepoints typically requires root, or the appropriate capabilities
@@ -79,7 +99,7 @@ sudo ./build_linux/src/realtime_detection \
   --max-events 1 \
   --timeout-ms 15000 &
 
-sudo ./build_linux/tools/target_process --alloc-mb 32 --sleep-ms 8000 --pattern "i am a shellcode"
+./build_linux/tools/target_process --alloc-mb 32 --sleep-ms 8000 --pattern "i am a shellcode"
 ```
 
 ## Experiments
@@ -90,6 +110,9 @@ Helper binary that allocates a buffer and embeds a known pattern (used for memor
 Validates that:
 - eBPF captures `execve` events for a known target binary, and
 - the scanner threads can find a deterministic pattern in those processes.
+
+It also prints per-process captured metadata (pid/uid/gid/comm/filePath) so you can demonstrate that eBPF is
+actually reporting the process identity you expect.
 
 It prints a concise summary including throughput.
 Example:
@@ -107,6 +130,9 @@ What CI does on Ubuntu 22.04 and 24.04:
 3) Runs an end-to-end demo that produces and parses `scan_results.json`.
 4) Runs a multi-thread benchmark (`--workers 1` vs `--workers 4`) and generates `ci_logs/bench_summary.txt`.
 5) Uploads all logs under `ci_logs/` as an artifact for inspection.
+
+CI also dumps relevant excerpts from `/usr/include/bpf/libbpf.h` (perf buffer APIs) into `ci_logs/build.log`
+to make libbpf API drift debuggable from a single log file.
 
 To inspect results:
 - Go to GitHub Actions → open a run → download the `ci-logs-ubuntu-*` artifact.
