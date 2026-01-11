@@ -1,0 +1,163 @@
+name: CI (Linux)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache FetchContent
+        uses: actions/cache@v4
+        with:
+          path: .fcache
+          key: ${{ matrix.os }}-fcache-${{ hashFiles('CMakeLists.txt') }}
+          restore-keys: |
+            ${{ matrix.os }}-fcache-
+
+      - name: Install dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang llvm bpftool \
+            libbpf-dev libelf-dev zlib1g-dev \
+            cmake ninja-build pkg-config \
+            python3
+
+      - name: Collect system info
+        run: |
+          set -euxo pipefail
+          mkdir -p ci_logs
+          uname -a | tee ci_logs/uname.txt
+          cat /etc/os-release | tee ci_logs/os-release.txt
+          id | tee ci_logs/id.txt
+          clang --version | tee ci_logs/clang.txt
+          bpftool version | tee ci_logs/bpftool_version.txt
+          ls -la /sys/kernel/btf/vmlinux | tee ci_logs/kernel_btf.txt
+
+      - name: Configure
+        run: |
+          set -euxo pipefail
+          cmake -S . -B build_ci -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DRPD_FETCH_DEPS=ON \
+            -DRPD_BUILD_TOOLS=ON \
+            -DRPD_BUILD_EXPERIMENTS=ON \
+            -DBUILD_TESTING=ON \
+            -DFETCHCONTENT_BASE_DIR=.fcache \
+            | tee ci_logs/cmake_configure.log
+
+      - name: Build
+        run: |
+          set -euxo pipefail
+          cmake --build build_ci -j | tee ci_logs/build.log
+
+      - name: Run unit tests (root)
+        run: |
+          set -euxo pipefail
+          sudo ./build_ci/tests/runTests \
+            --gtest_color=yes \
+            --gtest_output=xml:ci_logs/gtest.xml \
+            | tee ci_logs/runTests.log
+          cp -f application.log ci_logs/application_from_tests.log || true
+          cp -f scan_results.json ci_logs/scan_results_from_tests.json || true
+
+      - name: E2E demo (realtime_detection + memory scan + JSON)
+        run: |
+          set -euxo pipefail
+          rm -f scan_results.json application.log
+
+          WATCH_PREFIX="$(realpath build_ci/tools)"
+
+          sudo ./build_ci/src/realtime_detection \
+            --watch-prefix "$WATCH_PREFIX" \
+            --pattern "i am a shellcode" \
+            --workers 2 \
+            --scan-delay-ms 200 \
+            --max-events 1 \
+            --timeout-ms 15000 \
+            > ci_logs/realtime_detection.log 2>&1 &
+          DET_PID=$!
+
+          # Ensure the detector is ready before triggering exec.
+          sleep 0.5
+
+          sudo ./build_ci/tools/target_process \
+            --alloc-mb 32 \
+            --sleep-ms 8000 \
+            --pattern "i am a shellcode" \
+            > ci_logs/target_process.log 2>&1 || true
+
+          wait "$DET_PID" || true
+
+          ls -la scan_results.json application.log | tee ci_logs/e2e_outputs.txt
+          cp -f application.log ci_logs/application_from_e2e.log || true
+          cp -f scan_results.json ci_logs/scan_results_from_e2e.json || true
+          python3 - <<'PY' | tee ci_logs/e2e_scan_results_parsed.txt
+          import json
+          with open("scan_results.json", "r") as f:
+              obj = json.load(f)
+          print(obj)
+          PY
+
+      - name: Multi-thread benchmark (eBPF + scan)
+        run: |
+          set -euxo pipefail
+          sudo ./build_ci/experiments/ebpf_scan_bench \
+            --workers 1 \
+            --processes 8 \
+            --alloc-mb 64 \
+            --scan-delay-ms 200 \
+            --timeout-ms 30000 \
+            --no-json \
+            2>&1 | tee ci_logs/bench_workers_1.log
+
+          sudo ./build_ci/experiments/ebpf_scan_bench \
+            --workers 4 \
+            --processes 8 \
+            --alloc-mb 64 \
+            --scan-delay-ms 200 \
+            --timeout-ms 30000 \
+            --no-json \
+            2>&1 | tee ci_logs/bench_workers_4.log
+
+      - name: Benchmark summary
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY' | tee ci_logs/bench_summary.txt
+          import pathlib
+          import re
+          
+          def parse_elapsed_ms(path: str):
+              text = pathlib.Path(path).read_text()
+              m = re.search(r"elapsed_ms=(\d+)", text)
+              return int(m.group(1)) if m else None
+          
+          t1 = parse_elapsed_ms("ci_logs/bench_workers_1.log")
+          t4 = parse_elapsed_ms("ci_logs/bench_workers_4.log")
+          speedup = (t1 / t4) if (t1 and t4 and t4 > 0) else None
+          
+          print({
+              "elapsed_ms_workers_1": t1,
+              "elapsed_ms_workers_4": t4,
+              "speedup_1_over_4": speedup,
+          })
+          PY
+
+      - name: Upload logs and artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-logs-${{ matrix.os }}
+          path: |
+            ci_logs
+            build_ci/CMakeCache.txt
