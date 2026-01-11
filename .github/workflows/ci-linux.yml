@@ -57,6 +57,7 @@ jobs:
           cat /etc/os-release | tee ci_logs/os-release.txt
           id | tee ci_logs/id.txt
           clang --version | tee ci_logs/clang.txt
+          echo 'int x;' | clang -v -E -target bpf -x c - 2>&1 | tee ci_logs/clang_bpf_includes.txt
           bpftool version | tee ci_logs/bpftool_version.txt
           ls -la /sys/kernel/btf/vmlinux | tee ci_logs/kernel_btf.txt
 
