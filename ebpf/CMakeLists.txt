@@ -31,12 +31,12 @@ add_custom_command(
     OUTPUT "${BPF_OBJ}"
     COMMAND
         "${BPF_CLANG}" -g -O2 -target bpf -D__TARGET_ARCH_${BPF_ARCH}
-        -I"${CMAKE_CURRENT_BINARY_DIR}"
-        -I"${CMAKE_CURRENT_SOURCE_DIR}"
-        -I"${LIBBPF_INCLUDE_DIRS}"
+        -I ${CMAKE_CURRENT_BINARY_DIR}
+        -I ${CMAKE_CURRENT_SOURCE_DIR}
+        -I ${LIBBPF_INCLUDE_DIRS}
         -Wall
-        -c "${CMAKE_CURRENT_SOURCE_DIR}/${BPF_PROG}.bpf.c"
-        -o "${BPF_OBJ}"
+        -c ${CMAKE_CURRENT_SOURCE_DIR}/${BPF_PROG}.bpf.c
+        -o ${BPF_OBJ}
     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/${BPF_PROG}.bpf.c" "${VMLINUX_H}"
     COMMENT "Compiling eBPF program"
     VERBATIM
