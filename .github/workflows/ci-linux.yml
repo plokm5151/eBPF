@@ -93,7 +93,7 @@ jobs:
             fmt="${TRACEFS_BASE}/events/${ev}/format"
             out="ci_logs/tracefs_format_${ev//\//_}.txt"
             if [ -f "${fmt}" ]; then
-              cat "${fmt}" | tee "${out}"
+              sudo cat "${fmt}" 2>&1 | tee "${out}" || true
             else
               echo "missing: ${fmt}" | tee "${out}"
             fi
