@@ -11,6 +11,14 @@ else()
     message(FATAL_ERROR "Unsupported arch for eBPF build: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
+set(BPF_EXTRA_INCLUDES)
+if(CMAKE_LIBRARY_ARCHITECTURE)
+    set(MULTIARCH_INCLUDE_DIR "/usr/include/${CMAKE_LIBRARY_ARCHITECTURE}")
+    if(EXISTS "${MULTIARCH_INCLUDE_DIR}")
+        list(APPEND BPF_EXTRA_INCLUDES -I "${MULTIARCH_INCLUDE_DIR}")
+    endif()
+endif()
+
 set(BPF_OBJ "${CMAKE_CURRENT_BINARY_DIR}/${BPF_PROG}.bpf.o")
 set(BPF_SKELETON_H "${CMAKE_CURRENT_BINARY_DIR}/${BPF_PROG}.skel.h")
 
@@ -23,6 +31,7 @@ add_custom_command(
         -I "${CMAKE_CURRENT_BINARY_DIR}"
         -I "${CMAKE_CURRENT_SOURCE_DIR}"
         -I "${CMAKE_SOURCE_DIR}/include"
+        ${BPF_EXTRA_INCLUDES}
         -I "${LIBBPF_INCLUDE_DIRS}"
         -Wall
         -c "${CMAKE_CURRENT_SOURCE_DIR}/${BPF_PROG}.bpf.c"

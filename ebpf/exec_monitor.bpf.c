@@ -1,13 +1,6 @@
 #include "ExecMonitor.h"
 
-// Minimal type aliases to keep the BPF program self-contained (no glibc/kernel UAPI headers).
-typedef unsigned char __u8;
-typedef unsigned short __u16;
-typedef unsigned int __u32;
-typedef unsigned long long __u64;
-typedef signed int __s32;
-typedef signed long long __s64;
-
+#include <linux/bpf.h>
 #include <bpf/bpf_helpers.h>
 
 /*
