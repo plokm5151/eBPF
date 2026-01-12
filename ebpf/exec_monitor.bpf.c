@@ -37,6 +37,8 @@ struct execve_args_t {
 struct {
     __uint(type, BPF_MAP_TYPE_PERF_EVENT_ARRAY);
     __uint(max_entries, 1024);
+    __type(key, __u32);
+    __type(value, __u32);
 } events SEC(".maps");
 
 struct {
