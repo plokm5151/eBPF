@@ -51,9 +51,9 @@ TEST(eBPFProgramTest, EventProcessing) {
     ASSERT_GE(child, 0);
     if (child == 0) {
         // NOTE: bpf_probe_read_user_str() is implemented with a "nofault" user copy helper in the kernel.
-        // If the page containing the string literal hasn't been faulted in yet, the eBPF program may observe
-        // an empty filename even though exec succeeds. Touching the memory here makes this test deterministic.
-        const char* path = "/bin/true";
+        // If the filename memory isn't resident, the eBPF program may observe an empty string even though
+        // exec succeeds. Put the path on the stack (already faulted in) to make this deterministic.
+        char path[] = "/bin/true";
         volatile char touch = path[0];
         (void)touch;
         ::execl(path, path, static_cast<char*>(nullptr));
