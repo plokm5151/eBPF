@@ -69,7 +69,14 @@ perf_buffer* openPerfBuffer(int mapFd, void* ctx, perf_buffer_sample_fn sampleCb
 }
 } // namespace
 
-eBPFProgram::eBPFProgram() : running_(false), skel_(nullptr), pb_(nullptr) {
+eBPFProgram::eBPFProgram() :
+    running_(false),
+    skel_(nullptr),
+    pb_(nullptr),
+    linkEnterExecve_(nullptr),
+    linkExitExecve_(nullptr),
+    linkEnterExecveat_(nullptr),
+    linkExitExecveat_(nullptr) {
     struct rlimit rl = {RLIM_INFINITY, RLIM_INFINITY};
     if (setrlimit(RLIMIT_MEMLOCK, &rl) != 0) {
         auto& logger = Logger::getInstance();
@@ -106,10 +113,37 @@ void eBPFProgram::start() {
         }
         skel_ = skel;
 
-        int err = exec_monitor_bpf__attach(skel_);
-        if (err) {
-            throw std::runtime_error("Failed to attach BPF skeleton: " + formatErrno(err));
-        }
+        auto attachTracepoint = [&](bpf_program* prog,
+                                    bpf_link** out,
+                                    const char* category,
+                                    const char* name,
+                                    bool optional) {
+            if (!prog) {
+                if (optional) {
+                    *out = nullptr;
+                    return;
+                }
+                throw std::runtime_error(std::string("Missing BPF program for ") + category + "/" + name);
+            }
+            bpf_link* link = bpf_program__attach_tracepoint(prog, category, name);
+            long attachErr = libbpf_get_error(link);
+            if (attachErr) {
+                if (optional && attachErr == -ENOENT) {
+                    *out = nullptr;
+                    return;
+                }
+                throw std::runtime_error(std::string("Failed to attach ") + category + "/" + name + ": " +
+                                         formatErrno(static_cast<int>(attachErr)));
+            }
+            *out = link;
+        };
+
+        attachTracepoint(skel_->progs.handle_enter_execve, &linkEnterExecve_, "syscalls", "sys_enter_execve", false);
+        attachTracepoint(skel_->progs.handle_exit_execve, &linkExitExecve_, "syscalls", "sys_exit_execve", false);
+
+        // execveat is not present on very old kernels; treat as optional for portability.
+        attachTracepoint(skel_->progs.handle_enter_execveat, &linkEnterExecveat_, "syscalls", "sys_enter_execveat", true);
+        attachTracepoint(skel_->progs.handle_exit_execveat, &linkExitExecveat_, "syscalls", "sys_exit_execveat", true);
 
         int mapFd = bpf_map__fd(skel_->maps.events);
 
@@ -146,6 +180,24 @@ void eBPFProgram::stop() {
         perf_buffer__free(pb_);
         pb_ = nullptr;
     }
+
+    if (linkEnterExecve_) {
+        bpf_link__destroy(linkEnterExecve_);
+        linkEnterExecve_ = nullptr;
+    }
+    if (linkExitExecve_) {
+        bpf_link__destroy(linkExitExecve_);
+        linkExitExecve_ = nullptr;
+    }
+    if (linkEnterExecveat_) {
+        bpf_link__destroy(linkEnterExecveat_);
+        linkEnterExecveat_ = nullptr;
+    }
+    if (linkExitExecveat_) {
+        bpf_link__destroy(linkExitExecveat_);
+        linkExitExecveat_ = nullptr;
+    }
+
     if (skel_) {
         exec_monitor_bpf__destroy(skel_);
         skel_ = nullptr;
