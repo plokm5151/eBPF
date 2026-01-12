@@ -30,6 +30,16 @@ struct trace_event_raw_sys_exit {
     __s64 ret;
 };
 
+#if defined(__TARGET_ARCH_x86)
+#define RPD_SYSCALL_EXECVE 59
+#define RPD_SYSCALL_EXECVEAT 322
+#elif defined(__TARGET_ARCH_arm64)
+#define RPD_SYSCALL_EXECVE 221
+#define RPD_SYSCALL_EXECVEAT 281
+#else
+#error "Unsupported BPF target arch for syscall numbers"
+#endif
+
 struct execve_args_t {
     char filename[256];
 };
@@ -64,9 +74,19 @@ struct {
     __type(value, struct process_info_t);
 } scratch_info SEC(".maps");
 
-SEC("tracepoint/syscalls/sys_enter_execve")
-int handle_enter_execve(struct trace_event_raw_sys_enter* ctx)
+SEC("tracepoint/raw_syscalls/sys_enter")
+int handle_sys_enter(struct trace_event_raw_sys_enter* ctx)
 {
+    __s64 id = ctx->id;
+    const char* filename = 0;
+    if (id == RPD_SYSCALL_EXECVE) {
+        filename = (const char*)(unsigned long)ctx->args[0];
+    } else if (id == RPD_SYSCALL_EXECVEAT) {
+        filename = (const char*)(unsigned long)ctx->args[1];
+    } else {
+        return 0;
+    }
+
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
     __u32 scratch_key = 0;
@@ -76,27 +96,6 @@ int handle_enter_execve(struct trace_event_raw_sys_enter* ctx)
     }
     __builtin_memset(args, 0, sizeof(*args));
 
-    const char *filename = (const char *)(unsigned long)ctx->args[0];
-    bpf_probe_read_user_str(args->filename, sizeof(args->filename), filename);
-
-    bpf_map_update_elem(&execve_args, &pid_tgid, args, BPF_ANY);
-    return 0;
-}
-
-SEC("tracepoint/syscalls/sys_enter_execveat")
-int handle_enter_execveat(struct trace_event_raw_sys_enter* ctx)
-{
-    __u64 pid_tgid = bpf_get_current_pid_tgid();
-
-    __u32 scratch_key = 0;
-    struct execve_args_t* args = bpf_map_lookup_elem(&scratch_args, &scratch_key);
-    if (!args) {
-        return 0;
-    }
-    __builtin_memset(args, 0, sizeof(*args));
-
-    // execveat(int dfd, const char __user *filename, ...): filename is args[1]
-    const char *filename = (const char *)(unsigned long)ctx->args[1];
     bpf_probe_read_user_str(args->filename, sizeof(args->filename), filename);
 
     bpf_map_update_elem(&execve_args, &pid_tgid, args, BPF_ANY);
@@ -139,15 +138,13 @@ static __always_inline int handle_exit_exec_common(struct trace_event_raw_sys_ex
     return 0;
 }
 
-SEC("tracepoint/syscalls/sys_exit_execve")
-int handle_exit_execve(struct trace_event_raw_sys_exit* ctx)
+SEC("tracepoint/raw_syscalls/sys_exit")
+int handle_sys_exit(struct trace_event_raw_sys_exit* ctx)
 {
-    return handle_exit_exec_common(ctx);
-}
-
-SEC("tracepoint/syscalls/sys_exit_execveat")
-int handle_exit_execveat(struct trace_event_raw_sys_exit* ctx)
-{
+    __s64 id = ctx->id;
+    if (id != RPD_SYSCALL_EXECVE && id != RPD_SYSCALL_EXECVEAT) {
+        return 0;
+    }
     return handle_exit_exec_common(ctx);
 }
 

@@ -10,10 +10,12 @@ This is designed to showcase:
 2) multi-threaded user-space processing/scanning throughput.
 
 ## How It Works (High-Level)
-1) **eBPF** attaches to syscall tracepoints (`sys_enter_execve` / `sys_exit_execve`).
+1) **eBPF** attaches to raw syscall tracepoints (`raw_syscalls/sys_enter` and `raw_syscalls/sys_exit`) and filters for `execve`/`execveat`.
    - The BPF program defines the tracepoint context structs locally (no `vmlinux.h` / no CO-RE), so it does not require kernel BTF at runtime.
-2) On `sys_enter_execve`, it reads the user-space `filename` pointer (best-effort) into a map keyed by `pid_tgid`.
-3) On successful `sys_exit_execve`, it builds a `process_info_t` event (pid/uid/gid/comm/filename) and sends it to user space through a **perf event array** map.
+2) On `raw_syscalls/sys_enter`, it reads the user-space `filename` pointer (best-effort) into a map keyed by `pid_tgid`.
+   - `execve`: `args[0]` is `filename`
+   - `execveat`: `args[1]` is `filename`
+3) On successful `raw_syscalls/sys_exit`, it builds a `process_info_t` event (pid/uid/gid/comm/filename) and sends it to user space through a **perf event array** map.
 4) **User space** (libbpf skeleton) opens a perf buffer, receives events, and pushes them into an internal queue.
 5) **Worker threads** consume events, filter by `--watch-prefix`, and optionally scan the process memory for `--pattern`.
 6) Results are persisted as:

@@ -40,10 +40,8 @@ private:
 
     exec_monitor_bpf* skel_;
     perf_buffer* pb_;
-    bpf_link* linkEnterExecve_;
-    bpf_link* linkExitExecve_;
-    bpf_link* linkEnterExecveat_;
-    bpf_link* linkExitExecveat_;
+    bpf_link* linkSysEnter_;
+    bpf_link* linkSysExit_;
 
     std::mutex queueMutex_;
     std::condition_variable queueCv_;

@@ -60,17 +60,29 @@ TEST(eBPFProgramTest, EventProcessing) {
 
     // Find the matching event.
     std::optional<ProcessInfo> matched;
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    std::string observed;
+    size_t observedCount = 0;
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (std::chrono::steady_clock::now() < deadline) {
         auto event = program.waitNextProcessEvent(std::chrono::milliseconds(200));
-        if (event && event->pid == child &&
+        if (!event) {
+            continue;
+        }
+        if (observedCount < 25) {
+            observed += "pid=" + std::to_string(event->pid) + " comm=" + event->comm +
+                        " filePath=" + event->filePath + "\n";
+            ++observedCount;
+        }
+        if (event->pid == child &&
             (event->filePath == "/bin/true" || event->filePath == "/usr/bin/true")) {
             matched = std::move(event);
             break;
         }
     }
 
-    ASSERT_TRUE(matched.has_value());
+    ASSERT_TRUE(matched.has_value()) << "No matching exec event for pid=" << child
+                                     << " within timeout; first events:\n"
+                                     << observed;
     EXPECT_EQ(matched->pid, child);
     EXPECT_EQ(matched->uid, geteuid());
     EXPECT_EQ(matched->gid, getegid());

@@ -78,6 +78,26 @@ jobs:
           else
             echo "/sys/kernel/btf/vmlinux not present" | tee ci_logs/kernel_btf.txt
           fi
+          TRACEFS_BASE="/sys/kernel/tracing"
+          if [ ! -d "${TRACEFS_BASE}/events" ]; then
+            TRACEFS_BASE="/sys/kernel/debug/tracing"
+          fi
+          echo "${TRACEFS_BASE}" | tee ci_logs/tracefs_base.txt
+          for ev in \
+            raw_syscalls/sys_enter \
+            raw_syscalls/sys_exit \
+            syscalls/sys_enter_execve \
+            syscalls/sys_exit_execve \
+            syscalls/sys_enter_execveat \
+            syscalls/sys_exit_execveat; do
+            fmt="${TRACEFS_BASE}/events/${ev}/format"
+            out="ci_logs/tracefs_format_${ev//\//_}.txt"
+            if [ -f "${fmt}" ]; then
+              cat "${fmt}" | tee "${out}"
+            else
+              echo "missing: ${fmt}" | tee "${out}"
+            fi
+          done
 
       - name: Configure
         run: |
