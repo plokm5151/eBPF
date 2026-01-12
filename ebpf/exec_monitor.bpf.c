@@ -78,14 +78,15 @@ SEC("tracepoint/raw_syscalls/sys_enter")
 int handle_sys_enter(struct trace_event_raw_sys_enter* ctx)
 {
     __s64 id = ctx->id;
-    const char* filename = 0;
+    unsigned long filename_ptr = 0;
     if (id == RPD_SYSCALL_EXECVE) {
-        filename = (const char*)(unsigned long)ctx->args[0];
+        bpf_probe_read(&filename_ptr, sizeof(filename_ptr), &ctx->args[0]);
     } else if (id == RPD_SYSCALL_EXECVEAT) {
-        filename = (const char*)(unsigned long)ctx->args[1];
+        bpf_probe_read(&filename_ptr, sizeof(filename_ptr), &ctx->args[1]);
     } else {
         return 0;
     }
+    const char* filename = (const char*)filename_ptr;
 
     __u64 pid_tgid = bpf_get_current_pid_tgid();
 
