@@ -86,7 +86,7 @@ sudo ./build_linux/src/realtime_detection --help
 
 ### Output
 - `application.log`: runtime logs (matched events, scan results)
-- `scan_results.json`: appended JSON objects (one per matched + pattern-found event)
+- `scan_results.json`: last match as a single JSON object (overwritten each time to keep valid JSON)
 
 ### End-to-end demo (deterministic)
 This demo starts the detector, then launches a helper process that contains a known pattern in memory.
