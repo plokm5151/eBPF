@@ -155,15 +155,32 @@ jobs:
           sudo env CI=1 RPD_LIBBPF_DEBUG=1 ./build_ci/src/realtime_detection \
             --watch-prefix "$WATCH_PREFIX" \
             --pattern "i am a shellcode" \
-            --workers 2 \
+            --workers 1 \
             --scan-delay-ms 200 \
             --max-events 1 \
             --timeout-ms 15000 \
             > ci_logs/realtime_detection.log 2>&1 &
           DET_PID=$!
 
-          # Ensure the detector is ready before triggering exec.
-          sleep 0.5
+          # Ensure the detector is ready (BPF attached + perf buffer opened) before triggering exec.
+          for _ in $(seq 1 200); do
+            if grep -q "RPD_READY" ci_logs/realtime_detection.log; then
+              break
+            fi
+            if ! kill -0 "$DET_PID" 2>/dev/null; then
+              echo "ERROR: realtime_detection exited early"
+              tail -n 200 ci_logs/realtime_detection.log || true
+              sudo dmesg | tail -n 200 | tee ci_logs/dmesg_tail_after_e2e_failure.txt || true
+              exit 1
+            fi
+            sleep 0.05
+          done
+          if ! grep -q "RPD_READY" ci_logs/realtime_detection.log; then
+            echo "ERROR: realtime_detection did not become ready in time"
+            tail -n 200 ci_logs/realtime_detection.log || true
+            sudo dmesg | tail -n 200 | tee ci_logs/dmesg_tail_after_e2e_failure.txt || true
+            exit 1
+          fi
 
           "$TARGET_PROCESS" \
             --alloc-mb 32 \

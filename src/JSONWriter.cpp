@@ -11,6 +11,7 @@ void JSONWriter::writeProcessInfo(const ProcessInfo& processInfo) {
     j["comm"] = processInfo.comm;
     j["filePath"] = processInfo.filePath;
 
-    std::ofstream outFile("scan_results.json", std::ios::app);
+    // Keep this file valid JSON (single object) even if multiple matches are written.
+    std::ofstream outFile("scan_results.json", std::ios::trunc);
     outFile << j.dump(4) << std::endl;
 }

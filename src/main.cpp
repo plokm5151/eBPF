@@ -120,8 +120,8 @@ int main(int argc, char** argv) {
                     continue;
                 }
 
-                bool matchesPrefix = processInfo->filePath.rfind(opt.watchPrefix, 0) == 0;
                 std::string procExe;
+                bool matchesPrefix = processInfo->filePath.rfind(opt.watchPrefix, 0) == 0;
                 if (!matchesPrefix) {
                     procExe = tryReadProcExe(processInfo->pid);
                     if (!procExe.empty()) {
@@ -130,6 +130,14 @@ int main(int argc, char** argv) {
                 }
                 if (!matchesPrefix) {
                     continue;
+                }
+
+                if (processInfo->filePath.empty() && !procExe.empty()) {
+                    if (std::getenv("CI")) {
+                        std::cerr << "eBPF filename empty; using /proc/" << processInfo->pid << "/exe=" << procExe
+                                  << "\n";
+                    }
+                    processInfo->filePath = procExe;
                 }
 
                 size_t current = matchedEvents.fetch_add(1) + 1;
@@ -171,6 +179,7 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < opt.workers; ++i) {
             workers.emplace_back(workerFn);
         }
+        std::cerr << "RPD_READY" << std::endl;
 
         auto startedAt = std::chrono::steady_clock::now();
         while (!stop.load()) {
