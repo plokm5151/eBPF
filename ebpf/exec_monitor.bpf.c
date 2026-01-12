@@ -83,8 +83,27 @@ int handle_enter_execve(struct trace_event_raw_sys_enter* ctx)
     return 0;
 }
 
-SEC("tracepoint/syscalls/sys_exit_execve")
-int handle_exit_execve(struct trace_event_raw_sys_exit* ctx)
+SEC("tracepoint/syscalls/sys_enter_execveat")
+int handle_enter_execveat(struct trace_event_raw_sys_enter* ctx)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+
+    __u32 scratch_key = 0;
+    struct execve_args_t* args = bpf_map_lookup_elem(&scratch_args, &scratch_key);
+    if (!args) {
+        return 0;
+    }
+    __builtin_memset(args, 0, sizeof(*args));
+
+    // execveat(int dfd, const char __user *filename, ...): filename is args[1]
+    const char *filename = (const char *)(unsigned long)ctx->args[1];
+    bpf_probe_read_user_str(args->filename, sizeof(args->filename), filename);
+
+    bpf_map_update_elem(&execve_args, &pid_tgid, args, BPF_ANY);
+    return 0;
+}
+
+static __always_inline int handle_exit_exec_common(struct trace_event_raw_sys_exit* ctx)
 {
     __u64 pid_tgid = bpf_get_current_pid_tgid();
     struct execve_args_t* args = bpf_map_lookup_elem(&execve_args, &pid_tgid);
@@ -118,6 +137,18 @@ int handle_exit_execve(struct trace_event_raw_sys_exit* ctx)
 
     bpf_map_delete_elem(&execve_args, &pid_tgid);
     return 0;
+}
+
+SEC("tracepoint/syscalls/sys_exit_execve")
+int handle_exit_execve(struct trace_event_raw_sys_exit* ctx)
+{
+    return handle_exit_exec_common(ctx);
+}
+
+SEC("tracepoint/syscalls/sys_exit_execveat")
+int handle_exit_execveat(struct trace_event_raw_sys_exit* ctx)
+{
+    return handle_exit_exec_common(ctx);
 }
 
 char LICENSE[] SEC("license") = "GPL";
