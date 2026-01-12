@@ -21,20 +21,19 @@ Logger::~Logger() {
     }
 }
 
-void Logger::logInfo(const std::string& message) {
+void Logger::logLine(const char* level, const std::string& message) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::tm tm {};
     localtime_r(&now, &tm);
-    logFile_ << "[INFO] " << std::put_time(&tm, "%F %T") << ": " << message << '\n';
+    logFile_ << "[" << level << "] " << std::put_time(&tm, "%F %T") << ": " << message << '\n';
     logFile_.flush();
 }
 
+void Logger::logInfo(const std::string& message) {
+    logLine("INFO", message);
+}
+
 void Logger::logError(const std::string& message) {
-    std::lock_guard<std::mutex> lock(mutex_);
-    auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm tm {};
-    localtime_r(&now, &tm);
-    logFile_ << "[ERROR] " << std::put_time(&tm, "%F %T") << ": " << message << '\n';
-    logFile_.flush();
+    logLine("ERROR", message);
 }

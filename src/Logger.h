@@ -19,6 +19,8 @@ private:
     Logger(const Logger&) = delete;
     Logger& operator=(const Logger&) = delete;
 
+    void logLine(const char* level, const std::string& message);
+
     std::ofstream logFile_;
     std::mutex mutex_;
 };
